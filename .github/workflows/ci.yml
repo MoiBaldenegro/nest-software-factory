@@ -36,7 +36,7 @@ jobs:
         run: pnpm run lint
 
       - name: Test
-        run: pnpm test -- --runInBand
+        run: pnpm test --runInBand
 
       - name: Build
         run: pnpm run build
