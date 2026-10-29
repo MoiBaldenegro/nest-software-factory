@@ -39,4 +39,10 @@ describe('AppController', () => {
       expect(appController.getPing()).toEqual({ message: 'pong' });
     });
   });
+
+  describe('ready', () => {
+    it('should return { status: "ready" }', () => {
+      expect(appController.getReady()).toEqual({ status: 'ready' });
+    });
+  });
 });

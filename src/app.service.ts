@@ -30,4 +30,8 @@ export class AppService {
   getPing() {
     return { message: 'pong' };
   }
+
+  getReady() {
+    return { status: 'ready' };
+  }
 }

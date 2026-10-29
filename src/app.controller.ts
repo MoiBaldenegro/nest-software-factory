@@ -24,4 +24,9 @@ export class AppController {
   getPing() {
     return this.appService.getPing();
   }
+
+  @Get('ready')
+  getReady() {
+    return this.appService.getReady();
+  }
 }
