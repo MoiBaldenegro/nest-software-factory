@@ -12,6 +12,10 @@ export class AppService {
     return 'Hello World!';
   }
 
+  getHealth() {
+    return { status: 'ok' };
+  }
+
   getVersion(): { version: string } {
     try {
       const packageJsonPath = join(process.cwd(), 'package.json');
@@ -21,5 +25,9 @@ export class AppService {
     } catch {
       return { version: '0.0.0' };
     }
+  }
+
+  getPing() {
+    return { message: 'pong' };
   }
 }

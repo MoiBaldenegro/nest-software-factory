@@ -12,11 +12,16 @@ export class AppController {
 
   @Get('health')
   getHealth() {
-    return { status: 'ok' };
+    return this.appService.getHealth();
   }
 
   @Get('version')
   getVersion() {
     return this.appService.getVersion();
+  }
+
+  @Get('ping')
+  getPing() {
+    return this.appService.getPing();
   }
 }

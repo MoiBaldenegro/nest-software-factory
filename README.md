@@ -67,7 +67,8 @@ node factory/run-agent.mjs factory/tasks/add-version.md
 
 The path can be relative to the directory where the command is executed or
 an absolute path. The task file is required; the script exits with a usage
-message if it is omitted.
+message if it is omitted. After the agent completes, the script automatically
+runs lint, unit tests, and the production build.
 
 ## Deployment
 

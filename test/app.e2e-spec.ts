@@ -44,4 +44,12 @@ describe('AppController (e2e)', () => {
         expect(typeof body.version).toBe('string');
       });
   });
+
+  it('/ping (GET)', () => {
+    return request(app.getHttpServer())
+      .get('/ping')
+      .expect(200)
+      .expect('Content-Type', /json/)
+      .expect({ message: 'pong' });
+  });
 });
