@@ -174,27 +174,42 @@ async function createTaskWorktree(taskSlug) {
 
   try {
     await access(worktreePath);
-    const { stdout } = await execFileAsync(
-      "git",
-      ["-C", worktreePath, "branch", "--show-current"],
-      { cwd: projectDirectory },
-    );
-    const existingBranch = stdout.trim();
-
-    if (existingBranch !== branchName) {
-      throw new Error(
-        `Worktree ${worktreePath} already exists on branch ${existingBranch || "(detached HEAD)"}.`,
-      );
-    }
-
-    console.log(`Reusing existing worktree: ${worktreePath}`);
-    return { branchName, worktreePath };
-  } catch (error) {
-    if (error instanceof Error && error.message.startsWith("Worktree ")) {
-      throw error;
-    }
+  } catch {
+    // The worktree does not exist yet; create it below.
+    return createNewTaskWorktree(branchName, worktreePath);
   }
 
+  const { stdout: branchOutput } = await execFileAsync(
+    "git",
+    ["-C", worktreePath, "branch", "--show-current"],
+    { cwd: projectDirectory },
+  );
+  const existingBranch = branchOutput.trim();
+
+  if (existingBranch !== branchName) {
+    throw new Error(
+      `Worktree ${worktreePath} already exists on branch ${existingBranch || "(detached HEAD)"}.`,
+    );
+  }
+
+  const { stdout: statusOutput } = await execFileAsync(
+    "git",
+    ["-C", worktreePath, "status", "--porcelain"],
+    { cwd: projectDirectory },
+  );
+  const pendingChanges = statusOutput.trim();
+
+  if (pendingChanges) {
+    throw new Error(
+      `Worktree ${worktreePath} has pending changes. Review or clean these files before reusing it:\n${pendingChanges}`,
+    );
+  }
+
+  console.log(`Reusing existing worktree: ${worktreePath}`);
+  return { branchName, worktreePath };
+}
+
+async function createNewTaskWorktree(branchName, worktreePath) {
   const { stdout: existingBranches } = await execFileAsync(
     "git",
     ["branch", "--list", branchName],
@@ -241,16 +256,15 @@ async function ensureBaseBranchIsReady() {
     );
   }
 
-  try {
-    await execFileAsync("git", ["diff", "--quiet"], {
-      cwd: projectDirectory,
-    });
-    await execFileAsync("git", ["diff", "--cached", "--quiet"], {
-      cwd: projectDirectory,
-    });
-  } catch {
+  const { stdout: statusOutput } = await execFileAsync(
+    "git",
+    ["status", "--porcelain"],
+    { cwd: projectDirectory },
+  );
+
+  if (statusOutput.trim()) {
     throw new Error(
-      "Base project has uncommitted changes. Commit or stash them before starting a factory task.",
+      `Base project has uncommitted changes. Commit, stash, or review these files before starting a factory task:\n${statusOutput}`,
     );
   }
 }
@@ -381,8 +395,8 @@ async function runAgent(options) {
 
   const { branchName, worktreePath } = await createTaskWorktree(taskSlug);
 
-  console.log(`Created branch: ${branchName}`);
-  console.log(`Created worktree: ${worktreePath}`);
+  console.log(`Task branch: ${branchName}`);
+  console.log(`Task worktree: ${worktreePath}`);
   console.log("Changes will remain available for review; no push or merge will be performed.");
 
   await installDependencies(worktreePath);

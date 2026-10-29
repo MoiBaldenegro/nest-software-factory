@@ -89,7 +89,9 @@ and branch are kept available for review; the script does not push or merge
 automatically. Before creating the worktree, the current base project must
 be on a clean `main` branch and pass all validations. Validation failures
 include the complete command output in the repair prompt, and the agent gets
-up to two repair attempts.
+up to two repair attempts. An existing task worktree is reused only when it is
+on the expected branch and has no pending changes; otherwise the factory stops
+without deleting or overwriting anything.
 
 ## Deployment
 
