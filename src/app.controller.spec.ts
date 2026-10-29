@@ -64,9 +64,9 @@ describe('AppController', () => {
     });
   });
 
-  describe('deliberate validation failure', () => {
-    it('should intentionally fail to verify the validation pipeline', () => {
-      expect(appController.getHello()).toBe('Intentional failure');
+  describe('validation failure regression', () => {
+    it('should return the real greeting instead of the intentional failure value', () => {
+      expect(appController.getHello()).toBe('Hello World!');
     });
   });
 });

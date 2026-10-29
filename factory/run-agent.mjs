@@ -1,6 +1,7 @@
-import { spawn } from "node:child_process";
-import { readFile } from "node:fs/promises";
+import { execFile, spawn } from "node:child_process";
+import { access, readFile } from "node:fs/promises";
 import { basename, dirname, join, parse, resolve } from "node:path";
+import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
 
 const factoryDirectory = dirname(fileURLToPath(import.meta.url));
@@ -8,34 +9,50 @@ const projectDirectory = resolve(factoryDirectory, "..");
 const taskArgument = process.argv[2];
 
 const MAX_REPAIR_ATTEMPTS = 2;
+const execFileAsync = promisify(execFile);
 
 function runCommand(command, args, options = {}) {
   const executable =
     process.platform === "win32" && command === "pnpm"
       ? "pnpm.cmd"
       : command;
+  const { captureOutput = false, ...spawnOptions } = options;
+  const output = [];
 
   return new Promise((resolvePromise, reject) => {
     const child = spawn(executable, args, {
       cwd: projectDirectory,
-      stdio: "inherit",
+      stdio: captureOutput ? ["ignore", "pipe", "pipe"] : "inherit",
       shell: process.platform === "win32" && executable.endsWith(".cmd"),
-      ...options,
+      ...spawnOptions,
     });
 
     child.once("error", reject);
 
+    if (captureOutput) {
+      child.stdout.on("data", (chunk) => {
+        const text = chunk.toString();
+        output.push(text);
+        process.stdout.write(text);
+      });
+      child.stderr.on("data", (chunk) => {
+        const text = chunk.toString();
+        output.push(text);
+        process.stderr.write(text);
+      });
+    }
+
     child.once("close", (code) => {
       if (code === 0) {
-        resolvePromise();
+        resolvePromise(output.join(""));
         return;
       }
 
-      reject(
-        new Error(
-          `${command} ${args.join(" ")} exited with code ${code}`,
-        ),
+      const error = new Error(
+        `${command} ${args.join(" ")} exited with code ${code}`,
       );
+      error.output = output.join("");
+      reject(error);
     });
   });
 }
@@ -61,6 +78,41 @@ async function createTaskWorktree(taskSlug) {
     `${basename(projectDirectory)}-factory-${taskSlug}`,
   );
 
+  try {
+    await access(worktreePath);
+    const { stdout } = await execFileAsync(
+      "git",
+      ["-C", worktreePath, "branch", "--show-current"],
+      { cwd: projectDirectory },
+    );
+    const existingBranch = stdout.trim();
+
+    if (existingBranch !== branchName) {
+      throw new Error(
+        `Worktree ${worktreePath} already exists on branch ${existingBranch || "(detached HEAD)"}.`,
+      );
+    }
+
+    console.log(`Reusing existing worktree: ${worktreePath}`);
+    return { branchName, worktreePath };
+  } catch (error) {
+    if (error instanceof Error && error.message.startsWith("Worktree ")) {
+      throw error;
+    }
+  }
+
+  const { stdout: existingBranches } = await execFileAsync(
+    "git",
+    ["branch", "--list", branchName],
+    { cwd: projectDirectory },
+  );
+
+  if (existingBranches.trim()) {
+    throw new Error(
+      `Branch ${branchName} already exists outside the expected worktree ${worktreePath}.`,
+    );
+  }
+
   await runCommand("git", [
     "worktree",
     "add",
@@ -81,7 +133,35 @@ async function installDependencies(worktreePath) {
   });
 }
 
-async function validateProject(worktreePath) {
+async function ensureBaseBranchIsReady() {
+  const { stdout: branchOutput } = await execFileAsync(
+    "git",
+    ["branch", "--show-current"],
+    { cwd: projectDirectory },
+  );
+  const currentBranch = branchOutput.trim();
+
+  if (currentBranch !== "main") {
+    throw new Error(
+      `Factory must be started from the main branch; current branch is ${currentBranch || "(detached HEAD)"}.`,
+    );
+  }
+
+  try {
+    await execFileAsync("git", ["diff", "--quiet"], {
+      cwd: projectDirectory,
+    });
+    await execFileAsync("git", ["diff", "--cached", "--quiet"], {
+      cwd: projectDirectory,
+    });
+  } catch {
+    throw new Error(
+      "Base project has uncommitted changes. Commit or stash them before starting a factory task.",
+    );
+  }
+}
+
+async function validateProject(worktreePath, { captureOutput = false } = {}) {
   const checks = [
     ["lint", "pnpm", ["run", "lint"]],
     ["tests", "pnpm", ["exec", "jest", "--runInBand"]],
@@ -94,12 +174,22 @@ async function validateProject(worktreePath) {
     console.log(`\n=== Running ${name} ===`);
 
     try {
-      await runCommand(command, args, { cwd: worktreePath });
+      await runCommand(command, args, {
+        cwd: worktreePath,
+        captureOutput,
+      });
     } catch (error) {
       const message =
         error instanceof Error ? error.message : String(error);
+      const output =
+        error instanceof Error && "output" in error
+          ? String(error.output)
+          : "";
 
-      failures.push({ name, message });
+      failures.push({
+        name,
+        message: output ? `${message}\n\nOutput:\n${output}` : message,
+      });
       console.error(`Validation failed: ${name}`);
     }
   }
@@ -147,6 +237,23 @@ async function runAgent() {
   const taskPath = resolve(projectDirectory, taskArgument);
   const task = await readFile(taskPath, "utf8");
   const taskSlug = getTaskSlug(taskPath);
+
+  await ensureBaseBranchIsReady();
+  console.log("Validating base project before creating worktree...");
+  const baseValidation = await validateProject(projectDirectory, {
+    captureOutput: true,
+  });
+
+  if (!baseValidation.passed) {
+    const summary = baseValidation.failures
+      .map(({ name, message }) => `- ${name}: ${message}`)
+      .join("\n");
+
+    throw new Error(
+      `Base project validation failed. Fix the base project before starting a task:\n${summary}`,
+    );
+  }
+
   const { branchName, worktreePath } = await createTaskWorktree(taskSlug);
 
   console.log(`Created branch: ${branchName}`);
@@ -178,7 +285,9 @@ Requirements:
       `\nValidation cycle ${attempt + 1}/${MAX_REPAIR_ATTEMPTS + 1}`,
     );
 
-    const validation = await validateProject(worktreePath);
+    const validation = await validateProject(worktreePath, {
+      captureOutput: true,
+    });
 
     if (validation.passed) {
       console.log("\nAll validations passed.");

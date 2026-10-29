@@ -71,7 +71,10 @@ message if it is omitted. After the agent completes, the script automatically
 runs lint, unit tests, and the production build. Each task is implemented in
 a new `factory/<task-name>` branch and an independent worktree. The worktree
 and branch are kept available for review; the script does not push or merge
-automatically.
+automatically. Before creating the worktree, the current base project must
+be on a clean `main` branch and pass all validations. Validation failures
+include the complete command output in the repair prompt, and the agent gets
+up to two repair attempts.
 
 ## Deployment
 
