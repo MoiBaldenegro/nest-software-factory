@@ -224,7 +224,12 @@ function getAgentCommand() {
 async function runOpenCode(prompt, worktreePath) {
   const command = getAgentCommand();
 
-  await runCommand(command, ["run", prompt], { cwd: worktreePath });
+  await runCommand(command, [
+    "run",
+    "--dir",
+    worktreePath,
+    prompt,
+  ], { cwd: worktreePath });
 }
 
 async function runAgent() {
