@@ -63,4 +63,10 @@ describe('AppController', () => {
       expect(appController.getHello()).toBe('Hello World!');
     });
   });
+
+  describe('deliberate validation failure', () => {
+    it('should intentionally fail to verify the validation pipeline', () => {
+      expect(appController.getHello()).toBe('Intentional failure');
+    });
+  });
 });

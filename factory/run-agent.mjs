@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import { readFile } from "node:fs/promises";
-import { dirname, join, resolve } from "node:path";
+import { basename, dirname, join, parse, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const factoryDirectory = dirname(fileURLToPath(import.meta.url));
@@ -40,7 +40,48 @@ function runCommand(command, args, options = {}) {
   });
 }
 
-async function validateProject() {
+function getTaskSlug(taskPath) {
+  const taskName = parse(basename(taskPath)).name.toLowerCase();
+  const slug = taskName
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-|-$/g, "");
+
+  if (!slug) {
+    throw new Error(`Could not derive a branch name from task: ${taskPath}`);
+  }
+
+  return slug;
+}
+
+async function createTaskWorktree(taskSlug) {
+  const branchName = `factory/${taskSlug}`;
+  const worktreePath = resolve(
+    projectDirectory,
+    "..",
+    `${basename(projectDirectory)}-factory-${taskSlug}`,
+  );
+
+  await runCommand("git", [
+    "worktree",
+    "add",
+    "--quiet",
+    "-b",
+    branchName,
+    worktreePath,
+    "HEAD",
+  ]);
+
+  return { branchName, worktreePath };
+}
+
+async function installDependencies(worktreePath) {
+  console.log("\n=== Installing dependencies in worktree ===");
+  await runCommand("pnpm", ["install", "--frozen-lockfile"], {
+    cwd: worktreePath,
+  });
+}
+
+async function validateProject(worktreePath) {
   const checks = [
     ["lint", "pnpm", ["run", "lint"]],
     ["tests", "pnpm", ["exec", "jest", "--runInBand"]],
@@ -53,7 +94,7 @@ async function validateProject() {
     console.log(`\n=== Running ${name} ===`);
 
     try {
-      await runCommand(command, args);
+      await runCommand(command, args, { cwd: worktreePath });
     } catch (error) {
       const message =
         error instanceof Error ? error.message : String(error);
@@ -90,10 +131,10 @@ function getAgentCommand() {
   );
 }
 
-async function runOpenCode(prompt) {
+async function runOpenCode(prompt, worktreePath) {
   const command = getAgentCommand();
 
-  await runCommand(command, ["run", prompt]);
+  await runCommand(command, ["run", prompt], { cwd: worktreePath });
 }
 
 async function runAgent() {
@@ -105,6 +146,14 @@ async function runAgent() {
 
   const taskPath = resolve(projectDirectory, taskArgument);
   const task = await readFile(taskPath, "utf8");
+  const taskSlug = getTaskSlug(taskPath);
+  const { branchName, worktreePath } = await createTaskWorktree(taskSlug);
+
+  console.log(`Created branch: ${branchName}`);
+  console.log(`Created worktree: ${worktreePath}`);
+  console.log("Changes will remain available for review; no push or merge will be performed.");
+
+  await installDependencies(worktreePath);
 
   const implementationPrompt = `
 Follow AGENTS.md.
@@ -122,17 +171,18 @@ Requirements:
 `;
 
   console.log("Starting implementation with OpenCode...");
-  await runOpenCode(implementationPrompt);
+  await runOpenCode(implementationPrompt, worktreePath);
 
   for (let attempt = 0; attempt <= MAX_REPAIR_ATTEMPTS; attempt++) {
     console.log(
       `\nValidation cycle ${attempt + 1}/${MAX_REPAIR_ATTEMPTS + 1}`,
     );
 
-    const validation = await validateProject();
+    const validation = await validateProject(worktreePath);
 
     if (validation.passed) {
       console.log("\nAll validations passed.");
+      console.log(`Review branch ${branchName} in worktree ${worktreePath}.`);
       return;
     }
 
@@ -174,7 +224,7 @@ Please:
       `\nValidation failed. Starting repair attempt ${attempt + 1}/${MAX_REPAIR_ATTEMPTS}...`,
     );
 
-    await runOpenCode(repairPrompt);
+    await runOpenCode(repairPrompt, worktreePath);
   }
 }
 
