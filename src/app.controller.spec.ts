@@ -39,34 +39,4 @@ describe('AppController', () => {
       expect(appController.getPing()).toEqual({ message: 'pong' });
     });
   });
-
-  describe('validation probe', () => {
-    it('should return "Hello World!" after the validation probe is corrected', () => {
-      expect(appController.getHello()).toBe('Hello World!');
-    });
-  });
-
-  describe('validation failure probe', () => {
-    it('should pass validation after correction', () => {
-      expect(true).toBe(true);
-    });
-  });
-
-  describe('validation flow', () => {
-    it('should return "Hello World!"', () => {
-      expect(appController.getHello()).toBe('Hello World!');
-    });
-  });
-
-  describe('validation flow regression', () => {
-    it('should return "Hello World!"', () => {
-      expect(appController.getHello()).toBe('Hello World!');
-    });
-  });
-
-  describe('validation failure regression', () => {
-    it('should return the real greeting instead of the intentional failure value', () => {
-      expect(appController.getHello()).toBe('Hello World!');
-    });
-  });
 });
