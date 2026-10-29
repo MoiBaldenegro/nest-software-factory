@@ -6,10 +6,104 @@ import { fileURLToPath } from "node:url";
 
 const factoryDirectory = dirname(fileURLToPath(import.meta.url));
 const projectDirectory = resolve(factoryDirectory, "..");
-const taskArgument = process.argv[2];
 
 const MAX_REPAIR_ATTEMPTS = 2;
 const execFileAsync = promisify(execFile);
+
+function printUsage() {
+  console.log(`Usage:
+  node factory/run-agent.mjs --file <task-file>
+  node factory/run-agent.mjs --prompt "<instructions>"
+  node factory/run-agent.mjs --interactive
+  node factory/run-agent.mjs <task-file>
+
+Options:
+  -f, --file <path>       Read the task from a file
+  -p, --prompt <text>     Use task instructions directly
+  -i, --interactive       Capture task instructions from the terminal
+      --dry-run           Show the planned action without running OpenCode
+  -h, --help              Show this help
+`);
+}
+
+function parseCliArgs(args) {
+  const options = {
+    dryRun: false,
+    file: undefined,
+    prompt: undefined,
+    interactive: false,
+  };
+  const positional = [];
+
+  for (let index = 0; index < args.length; index += 1) {
+    const argument = args[index];
+    const nextArgument = () => {
+      const value = args[++index];
+
+      if (!value || value.startsWith("-")) {
+        throw new Error(`${argument} requires a value.`);
+      }
+
+      return value;
+    };
+
+    if (argument === "--dry-run") {
+      options.dryRun = true;
+    } else if (argument === "-h" || argument === "--help") {
+      options.help = true;
+    } else if (argument === "-i" || argument === "--interactive") {
+      options.interactive = true;
+    } else if (argument === "-f" || argument === "--file") {
+      options.file = nextArgument();
+    } else if (argument === "-p" || argument === "--prompt") {
+      options.prompt = nextArgument();
+    } else if (argument.startsWith("-")) {
+      throw new Error(`Unknown option: ${argument}`);
+    } else {
+      positional.push(argument);
+    }
+  }
+
+  if (positional.length > 1) {
+    throw new Error("Only one positional task file may be provided.");
+  }
+
+  if (positional.length === 1) {
+    if (options.file || options.prompt || options.interactive) {
+      throw new Error("Choose only one task source: file, prompt, or interactive.");
+    }
+    options.file = positional[0];
+  }
+
+  const sourceCount = [
+    options.file,
+    options.prompt,
+    options.interactive,
+  ].filter(Boolean).length;
+
+  if (!options.help && sourceCount !== 1) {
+    throw new Error("Provide exactly one task source: --file, --prompt, or --interactive.");
+  }
+
+  return options;
+}
+
+async function readInteractiveTask() {
+  process.stdout.write("Enter the task instructions, then press Ctrl+D (Git Bash) or Ctrl+Z followed by Enter (Windows):\n");
+  const chunks = [];
+
+  for await (const chunk of process.stdin) {
+    chunks.push(chunk);
+  }
+
+  const task = chunks.join("").trim();
+
+  if (!task) {
+    throw new Error("Interactive task cannot be empty.");
+  }
+
+  return task;
+}
 
 function runCommand(command, args, options = {}) {
   const executable =
@@ -232,16 +326,42 @@ async function runOpenCode(prompt, worktreePath) {
   ], { cwd: worktreePath });
 }
 
-async function runAgent() {
-  if (!taskArgument) {
-    throw new Error(
-      "Usage: node factory/run-agent.mjs <task-file>",
-    );
+async function runAgent(options) {
+  if (options.help) {
+    printUsage();
+    return;
   }
 
-  const taskPath = resolve(projectDirectory, taskArgument);
-  const task = await readFile(taskPath, "utf8");
-  const taskSlug = getTaskSlug(taskPath);
+  let task;
+  let taskSlug;
+  let taskDescription;
+
+  if (options.file) {
+    const taskPath = resolve(projectDirectory, options.file);
+    task = await readFile(taskPath, "utf8");
+    taskSlug = getTaskSlug(taskPath);
+    taskDescription = `file: ${taskPath}`;
+  } else if (options.prompt) {
+    task = options.prompt.trim();
+    if (!task) {
+      throw new Error("Prompt task cannot be empty.");
+    }
+    taskSlug = "prompt-task";
+    taskDescription = "direct prompt";
+  } else {
+    task = await readInteractiveTask();
+    taskSlug = "interactive-task";
+    taskDescription = "interactive terminal input";
+  }
+
+  if (options.dryRun) {
+    console.log(`Task source: ${taskDescription}`);
+    console.log(`Planned branch: factory/${taskSlug}`);
+    console.log("Planned actions: validate main, create/reuse worktree, install dependencies, run OpenCode, then lint, tests, build, and up to two repairs.");
+    console.log("\nTask instructions:\n");
+    console.log(task);
+    return;
+  }
 
   await ensureBaseBranchIsReady();
   console.log("Validating base project before creating worktree...");
@@ -342,8 +462,20 @@ Please:
   }
 }
 
-runAgent().catch((error) => {
+let cliOptions;
+
+try {
+  cliOptions = parseCliArgs(process.argv.slice(2));
+} catch (error) {
+  console.error(error instanceof Error ? error.message : String(error));
+  printUsage();
+  process.exitCode = 1;
+}
+
+if (cliOptions) {
+  runAgent(cliOptions).catch((error) => {
   console.error("\nFactory execution failed:");
   console.error(error);
   process.exitCode = 1;
-});
+  });
+}

@@ -59,15 +59,30 @@ $ pnpm run test:cov
 
 ## Run a factory task
 
-Pass the task file as the first argument:
+Use one of the following task input modes:
 
 ```bash
+# Read a task from a file
+node factory/run-agent.mjs --file factory/tasks/add-version.md
+
+# Backward-compatible positional file syntax
 node factory/run-agent.mjs factory/tasks/add-version.md
+
+# Pass instructions directly
+node factory/run-agent.mjs --prompt "Add GET /ready and an automated test."
+
+# Capture multiline instructions from the terminal
+node factory/run-agent.mjs --interactive
+
+# Show the planned actions without running OpenCode
+node factory/run-agent.mjs --file factory/tasks/add-version.md --dry-run
+
+# Show all options
+node factory/run-agent.mjs --help
 ```
 
-The path can be relative to the directory where the command is executed or
-an absolute path. The task file is required; the script exits with a usage
-message if it is omitted. After the agent completes, the script automatically
+File paths can be relative to the directory where the command is executed or
+absolute. After the agent completes, the script automatically
 runs lint, unit tests, and the production build. Each task is implemented in
 a new `factory/<task-name>` branch and an independent worktree. The worktree
 and branch are kept available for review; the script does not push or merge
